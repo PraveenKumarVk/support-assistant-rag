@@ -1,3 +1,6 @@
+[tool.poetry]
+package-mode = false
+
 [project]
 name = "support-assistant-rag"
 version = "0.1.0"
