@@ -6,6 +6,12 @@ import pypdf
 import pytesseract
 from pdf2image import convert_from_path
 from bs4 import BeautifulSoup, NavigableString, Tag
+import argparse
+from . import config
+from pathlib import Path
+from rank_bm25 import BM25Okapi
+import re
+import pickle
 
 embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
@@ -55,11 +61,10 @@ def store_chunks(chunk_store):
             metric='cosine',
             spec=ServerlessSpec(cloud='aws', region='us-east-1')
         )
-    chunks = list(chunk_store.values())
     vectors = []
-    for chunk in chunks:
-        vectors.append({'id':chunk['chunk_id'], 'values': list(chunk['embedding']), 'metadata':{k:v for k,v in chunk.items() if k not in ['embedding','chunk_id']}})
-        
+    for chunk_id, chunk in chunk_store.items():
+        vectors.append({'id':chunk_id, 'values': [float(x) for x in chunk['embedding']], 'metadata':{k:v for k,v in chunk.items() if k != 'embedding'}})
+
     index = pc.Index(index_name)
     index.upsert(vectors=vectors, namespace='md-vectors')
     
@@ -97,6 +102,16 @@ def load_pdf(file_path):
     pdf_type = detect_pdf_type(file_path=file_path)
     text = load_text_native_pdf(file_path) if pdf_type == "text_native" else load_scanned_pdf(file_path)
     return text
+
+def chunk_pdf_file(file_path:str, chunk_size:int, overlap:int):
+    text = load_pdf(file_path)
+    chunks = chunk_text(text, chunk_size, overlap)
+    chunk_store = {}
+    file_name = os.path.basename(file_path)
+    for chunk in chunks:
+        chunk_id = str(uuid.uuid4())
+        chunk_store[chunk_id] = {'chunk_text':chunk, 'file_path':file_path, 'file_type':"pdf", 'location': file_name}
+    return chunk_store
 
 
 def load_html_file(file_path:str):
@@ -161,3 +176,41 @@ def chunk_html_file(file_path:str, chunk_size:int, overlap:int):
             chunk_id = str(uuid.uuid4())
             chunk_store[chunk_id] = {'chunk_text':chunk, 'file_path':file_path, 'file_type':"html", 'location': location}
     return chunk_store
+
+def build_bm25_index(chunk_store:dict):
+    documents = []
+    chunk_ids = []
+    for chunk_id, chunk in chunk_store.items():
+        documents.append(chunk['chunk_text'])
+        chunk_ids.append(chunk_id)
+    tokenized_corpus = [re.sub(r'[^\w\s-]', '', doc).lower().split() for doc in documents]
+    bm25 = BM25Okapi(tokenized_corpus)
+    with open(config.BM25_INDEX_PATH, "wb") as f:
+        pickle.dump((bm25, chunk_ids), f)
+    return bm25, chunk_ids
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--corpus", type=str, default=str(config.CORPUS_DIR))
+    args = parser.parse_args()
+    corpus_dir = Path(args.corpus).resolve()
+    chunk_store = {}
+    
+    for root, _, files in os.walk(corpus_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                if file.endswith(".md"):
+                    chunk_store.update(chunk_markdown_file(file_path,1000,200))
+                elif file.endswith(".html"):
+                    chunk_store.update(chunk_html_file(file_path,1000,200))
+                elif file.endswith(".pdf"):
+                    chunk_store.update(chunk_pdf_file(file_path,1000,200))
+            except Exception as ex:
+                print(f"Error loading file: {ex}")
+    build_bm25_index(chunk_store)
+    embedded_chunk_store = embed_chunks(chunk_store)
+    store_chunks(embedded_chunk_store)
+    
+if __name__=="__main__":
+    main()

@@ -1,2 +1,6 @@
 corpus/
 .env
+__pycache__/
+bm25.pkl
+evals/results/
+.pytest_cache/

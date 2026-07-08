@@ -16,9 +16,20 @@ dependencies = [
     "pdf2image (>=1.17.0,<2.0.0)",
     "beautifulsoup4 (>=4.15.0,<5.0.0)",
     "rank-bm25 (>=0.2.2,<0.3.0)",
+    "pydantic (>=2.13.4,<3.0.0)",
+    "langchain (==0.3.27)",
+    "langchain-openai (==0.3.28)",
+    "ragas (>=0.4.3,<0.5.0)",
+    "transformers (==4.46.3)",
+    "numpy (>=1.24,<2.0)",
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)"
+]
